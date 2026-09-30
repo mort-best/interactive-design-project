@@ -169,7 +169,7 @@ function tick(): void {
   hand.update(now, frameDt);
   ui.setHandSeen(tracker.status === "running" && now - hand.lastSeen < 300);
   const colliders = currentColliders(now);
-  const handBlocks = inputSource === "hand";
+  const handBlocks = tracker.status === "running" && hand.shape.strength > 0;
   for (let s = 0; s < steps; s++) {
     applyColliders(objects, colliders, h);
     for (const obj of objects) obj.update(h);

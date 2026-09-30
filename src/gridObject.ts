@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { PHYSICS } from "./config";
+import { HAND, PHYSICS } from "./config";
 
 // 격자 위의 한 오브젝트. 원래 위치/회전을 기억하고,
 // 스프링 + 감쇠로 그곳으로 탄성 있게 돌아옵니다.
@@ -95,22 +95,32 @@ export class GridObject {
     this.syncMesh();
   }
 
-  // 손 영역 밖으로 밀어냅니다(위치 제약).
-  // (nx, ny): 밀어낼 방향, depth: 겹친 깊이, maxMove: 이번 단계에서 옮길 수 있는 최대 거리
-  // (hvx, hvy): 손이 미는 속도 — 손이 움직이면 그 속도로 함께 밀려납니다.
-  pushOut(nx: number, ny: number, depth: number, maxMove: number, hvx: number, hvy: number): void {
-    const move = Math.min(depth, maxMove);
-    this.offset.x += nx * move;
-    this.offset.y += ny * move;
-    // 손 쪽으로 들어가는 속도는 없애고, 손이 미는 속도보다 느리면 그만큼 맞춰 줌
+  // 손 가장자리에서 부드럽게 밀어냅니다. 위치를 직접 옮기지 않고 속도만 바꿔서,
+  // 손 인식이 조금 떨려도 오브젝트는 매끄럽게 움직입니다.
+  // (nx, ny): 바깥 방향, pen: 가장자리 안쪽으로 들어온 깊이
+  // (hvx, hvy): 그 자리에서 손이 움직이는 속도 — 손이 다가오면 그만큼 함께 밀려남
+  pressOut(nx: number, ny: number, pen: number, hvx: number, hvy: number, dt: number): void {
     const vn = this.velocity.x * nx + this.velocity.y * ny;
-    const target = Math.max(vn, hvx * nx + hvy * ny, 0);
-    this.velocity.x += nx * (target - vn);
-    this.velocity.y += ny * (target - vn);
-    this.reachOverride = Math.max(this.reachOverride, this.offset.length());
+    // 깊이 들어올수록 빨리 나가되, 속도에 상한을 둬서 한꺼번에 튀어나가지 않게 함
+    const handIn = Math.max(0, hvx * nx + hvy * ny);
+    const target = Math.min(pen * HAND.pressRate, HAND.maxPressSpeed) + handIn;
+    if (vn < target) {
+      const a = 1 - Math.exp(-HAND.pressResponse * dt);
+      const dv = (target - vn) * a;
+      this.velocity.x += nx * dv;
+      this.velocity.y += ny * dv;
+    }
+    // 가장자리를 따라 미끄러지는 움직임은 살짝 줄여 손을 감싼 채로 자리를 잡게 함
+    const vn2 = this.velocity.x * nx + this.velocity.y * ny;
+    const tx = this.velocity.x - nx * vn2;
+    const ty = this.velocity.y - ny * vn2;
+    const keep = Math.exp(-HAND.pressFriction * dt);
+    this.velocity.x = nx * vn2 + tx * keep;
+    this.velocity.y = ny * vn2 + ty * keep;
+
+    this.reachOverride = Math.max(this.reachOverride, this.offset.length() + 0.2);
     this.held = true;
     this.timeSincePush = 0; // 손이 떠난 뒤 잠깐 멈췄다가 천천히 돌아오도록
-    this.syncMesh();
   }
 
   private syncMesh(): void {

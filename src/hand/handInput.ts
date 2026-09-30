@@ -35,6 +35,10 @@ export class HandInput {
 
   private readonly tracks: Track[];
   private readonly predicted: HandPoint[] = Array.from({ length: N }, () => ({ x: 0, y: 0, vx: 0, vy: 0 }));
+  // 손 모양 영역용: 한 번 더 부드럽게 거른 점들과, 영역의 크기(0~1)
+  private readonly shapePts: HandPoint[] = Array.from({ length: N }, () => ({ x: 0, y: 0, vx: 0, vy: 0 }));
+  private shapeFresh = true;
+  shapeStrength = 0;
   private needsReset = true;
   private lastFrameTime = 0;
 
@@ -181,8 +185,22 @@ export class HandInput {
     });
     for (const c of this.colliders) c.weight = this.presence;
 
-    // 들어올 수 없는 손 영역 (나타날 때 작게 시작해 커지고, 사라질 때 작아짐)
-    this.shape.set(this.predicted, this.presence);
+    // 들어올 수 없는 손 영역.
+    // 떨림을 한 번 더 거르고, 나타날 때는 손바닥 중심에서 천천히 커져 오브젝트가 부드럽게 비켜남.
+    this.shapeStrength = seen
+      ? Math.min(1, this.shapeStrength + dt / HAND.shapeFadeIn)
+      : Math.max(0, this.shapeStrength - dt / HAND.shapeFadeOut);
+    if (this.shapeStrength === 0) this.shapeFresh = true;
+    const a = this.shapeFresh ? 1 : 1 - Math.exp((-dt * 1000) / HAND.shapeSmoothMs);
+    this.shapeFresh = false;
+    this.predicted.forEach((p, k) => {
+      const q = this.shapePts[k];
+      q.x += (p.x - q.x) * a;
+      q.y += (p.y - q.y) * a;
+      q.vx += (p.vx - q.vx) * a;
+      q.vy += (p.vy - q.vy) * a;
+    });
+    this.shape.set(this.shapePts, this.shapeStrength);
   }
 
   reset(): void {
@@ -191,5 +209,7 @@ export class HandInput {
     this.needsReset = true;
     for (const c of this.colliders) c.weight = 0;
     this.shape.strength = 0;
+    this.shapeStrength = 0;
+    this.shapeFresh = true;
   }
 }
