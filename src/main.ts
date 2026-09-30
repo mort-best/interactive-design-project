@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { BACKGROUND, COLLIDE, GRID, HAND, PHYSICS } from "./config";
 import { getGeometry, styleForCell, type CellStyle } from "./shapes";
-import { createStudioEnvironment, getMaterial, GlowLayer, type Quality } from "./look";
+import { getMaterial, GlowLayer, setupStudio, type Quality } from "./look";
 import { GridObject } from "./gridObject";
 import { Pointer } from "./pointer";
 import { applyColliders, type Collider } from "./interaction";
@@ -18,17 +18,11 @@ const app = document.getElementById("app")!;
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setClearColor(BACKGROUND, 1);
-// 색을 과하게 바꾸지 않는 톤 매핑: 호박색·노랑이 탁해지지 않고 하이라이트만 부드럽게 눌러 줌
-renderer.toneMapping = THREE.NeutralToneMapping;
-renderer.toneMappingExposure = 1.0;
 app.appendChild(renderer.domElement);
 
-// ---------- 씬 ----------
+// ---------- 씬: 크림색 배경, 넓은 스튜디오 환경 반사, 약한 직사광 ----------
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(BACKGROUND);
-// 넓은 스튜디오 조명이 비친 듯한 환경 반사
-scene.environment = createStudioEnvironment(renderer);
+setupStudio(renderer, scene, BACKGROUND);
 
 // ---------- 재질 품질 ----------
 // 기본은 반투명(high). 처음 몇 초 동안 프레임이 느리면 가벼운 재질(light)로 자동 전환.
@@ -77,12 +71,6 @@ const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
 camera.position.copy(CAMERA_POS);
 camera.lookAt(0, 0, 0);
 fitCamera(camera);
-
-// ---------- 조명: 대부분 환경 반사로 밝히고, 직사광은 약하게 ----------
-scene.add(new THREE.HemisphereLight(0xfff4e6, 0xf2d6b8, 0.55));
-const key = new THREE.DirectionalLight(0xfff2e2, 0.55);
-key.position.set(-5, 9, 12);
-scene.add(key);
 
 // ---------- 색이 번지는 접촉 그림자 ----------
 const glow = new GlowLayer(GRID.maxObjects + 64);
@@ -260,6 +248,22 @@ requestAnimationFrame(tick);
     return { strength: +hand.shape.strength.toFixed(2), centersInside, touching, maxOverlap: +maxOverlap.toFixed(3) };
   },
   quality: () => ({ quality, auto: autoQuality, decided: perf.decided, medianFrameMs: +perf.medianMs.toFixed(1) }),
+  setGlow: (on: boolean) => {
+    glow.mesh.visible = on;
+  },
+  // 오브젝트 사이 빈 곳(네 칸이 만나는 모서리)의 화면 좌표 — 배경색 확인용
+  gapPoints: () => {
+    const pts: [number, number][] = [];
+    const v = new THREE.Vector3();
+    const startX = (-(layout.cols - 1) * GRID.spacing) / 2;
+    const startY = ((layout.rows - 1) * GRID.spacing) / 2;
+    for (let r = 0; r < layout.rows - 1; r++)
+      for (let c = 0; c < layout.cols - 1; c++) {
+        v.set(startX + (c + 0.5) * GRID.spacing, startY - (r + 0.5) * GRID.spacing, 0).project(camera);
+        pts.push([Math.round(((v.x + 1) / 2) * window.innerWidth), Math.round(((1 - v.y) / 2) * window.innerHeight)]);
+      }
+    return pts;
+  },
   setCollisions: (on: boolean) => {
     COLLIDE.enabled = on;
   },

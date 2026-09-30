@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { defineConfig } from "vite";
 
 // Use a relative base so the built assets resolve correctly regardless of the
@@ -7,5 +8,12 @@ export default defineConfig({
   base: "./",
   build: {
     outDir: "dist",
+    rollupOptions: {
+      // 작품(index.html)과 할로윈 모델 미리보기(models.html) 두 페이지
+      input: {
+        main: resolve(__dirname, "index.html"),
+        models: resolve(__dirname, "models.html"),
+      },
+    },
   },
 });

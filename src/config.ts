@@ -6,6 +6,7 @@ export const PALETTE = {
   cream: 0xf4e4c4,
   ink: 0x2a2320,
   yellow: 0xf6c643,
+  mustard: 0xd9a940, // 탁한 노랑 (할로윈 모델용)
 } as const;
 
 export const BACKGROUND = 0xf6eddc; // 따뜻한 크림색

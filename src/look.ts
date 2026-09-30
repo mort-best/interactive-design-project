@@ -28,8 +28,8 @@ const SPECS: Record<number, JellySpec> = {
     deep: 0xe9661c,
     rim: 0xffd7ad,
     rimStrength: 0.55,
-    glow: 0xf28a3c,
-    glowOpacity: 0.36,
+    glow: 0xe0783a,
+    glowOpacity: 0.22,
     transmission: 0.72,
     thickness: 1.0,
     attenuationDistance: 1.6,
@@ -42,8 +42,8 @@ const SPECS: Record<number, JellySpec> = {
     deep: 0xf1ae1c,
     rim: 0xfff4cc,
     rimStrength: 0.55,
-    glow: 0xf6c64c,
-    glowOpacity: 0.36,
+    glow: 0xd9a63a,
+    glowOpacity: 0.2,
     transmission: 0.72,
     thickness: 1.0,
     attenuationDistance: 1.8,
@@ -53,13 +53,28 @@ const SPECS: Record<number, JellySpec> = {
   },
   // 크림색은 배경과 비슷해서, 투과를 줄여 우윳빛 레진처럼 형태가 보이게 함
   [PALETTE.cream]: {
-    color: 0xf7e8cc,
-    deep: 0xe6c393,
+    color: 0xfbf2e2,
+    deep: 0xe4cba4,
     rim: 0xffffff,
+    rimStrength: 0.45,
+    glow: 0xc8a57a,
+    glowOpacity: 0.18,
+    transmission: 0.38,
+    thickness: 1.0,
+    attenuationDistance: 2.2,
+    roughness: 0.38,
+    clearcoat: 0.8,
+    clearcoatRoughness: 0.35,
+  },
+  // 탁한 노랑: 포장 사탕 끝 등
+  [PALETTE.mustard]: {
+    color: 0xe0b24c,
+    deep: 0xc08a24,
+    rim: 0xfff0c8,
     rimStrength: 0.5,
-    glow: 0xd9b88a,
-    glowOpacity: 0.32,
-    transmission: 0.5,
+    glow: 0xc99a3a,
+    glowOpacity: 0.18,
+    transmission: 0.6,
     thickness: 1.0,
     attenuationDistance: 1.6,
     roughness: 0.38,
@@ -70,10 +85,10 @@ const SPECS: Record<number, JellySpec> = {
   [PALETTE.ink]: {
     color: PALETTE.ink,
     deep: PALETTE.ink,
-    rim: 0x9a8676,
-    rimStrength: 0.45,
-    glow: 0x6a5a50,
-    glowOpacity: 0.24,
+    rim: 0xa8927f,
+    rimStrength: 0.55,
+    glow: 0x5a4c44,
+    glowOpacity: 0.18,
     transmission: 0,
     thickness: 0,
     attenuationDistance: Infinity,
@@ -103,8 +118,13 @@ function addRim(m: THREE.MeshPhysicalMaterial, color: number, strength: number):
 
 const materialCache = new Map<string, THREE.MeshPhysicalMaterial>();
 
-export function getMaterial(color: number, quality: Quality): THREE.MeshPhysicalMaterial {
-  const key = `${color}-${quality}`;
+export interface MaterialOptions {
+  // 정점 색으로 음영을 곱함 (해골의 눈구멍·치아 홈을 살짝 어둡게)
+  vertexColors?: boolean;
+}
+
+export function getMaterial(color: number, quality: Quality, opts: MaterialOptions = {}): THREE.MeshPhysicalMaterial {
+  const key = `${color}-${quality}-${opts.vertexColors ? "vc" : ""}`;
   let m = materialCache.get(key);
   if (m) return m;
   const s = SPECS[color];
@@ -115,13 +135,16 @@ export function getMaterial(color: number, quality: Quality): THREE.MeshPhysical
     ior: 1.36, // 물·젤리에 가까운 낮은 굴절률 → 배경이 유리처럼 또렷하게 휘어 보이지 않음
     clearcoat: s.clearcoat,
     clearcoatRoughness: s.clearcoatRoughness,
-    envMapIntensity: 1.0,
+    // 먹색은 형태가 묻히지 않도록 환경 반사를 조금 더 받음
+    envMapIntensity: s.transmission > 0 ? 1.0 : 1.35,
+    vertexColors: !!opts.vertexColors,
   });
   if (s.transmission > 0) {
     if (quality === "high") {
       // 실제 투과: 거칠기 때문에 비치는 배경이 흐려져 유리가 아닌 젤리처럼 보이고,
       // 두께·흡수 색 덕분에 속에 색이 머금어진 깊이가 생김
-      m.transmission = s.transmission;
+      // 정점 색으로 파인 곳을 표현하는 재질(해골)은 속이 덜 비치게 해서 윤곽이 흐려지지 않게
+      m.transmission = opts.vertexColors ? s.transmission * 0.45 : s.transmission;
       m.thickness = s.thickness;
       m.attenuationColor = new THREE.Color(s.deep);
       m.attenuationDistance = s.attenuationDistance;
@@ -144,6 +167,21 @@ export function getMaterial(color: number, quality: Quality): THREE.MeshPhysical
 export function glowFor(color: number): { color: number; opacity: number } {
   const s = SPECS[color];
   return { color: s.glow, opacity: s.glowOpacity };
+}
+
+// 작품과 모델 미리보기가 같은 조명 조건을 쓰도록 한 곳에 모아 둡니다.
+// 대부분 환경 반사로 밝히고, 직사광은 약하게 (딱딱한 그림자 없음)
+export function setupStudio(renderer: THREE.WebGLRenderer, scene: THREE.Scene, background: number): void {
+  renderer.setClearColor(background, 1);
+  // 색을 과하게 바꾸지 않는 톤 매핑: 호박색·노랑이 탁해지지 않고 하이라이트만 부드럽게 눌러 줌
+  renderer.toneMapping = THREE.NeutralToneMapping;
+  renderer.toneMappingExposure = 1.0;
+  scene.background = new THREE.Color(background);
+  scene.environment = createStudioEnvironment(renderer);
+  scene.add(new THREE.HemisphereLight(0xfff4e6, 0xf2d6b8, 0.55));
+  const key = new THREE.DirectionalLight(0xfff2e2, 0.55);
+  key.position.set(-5, 9, 12);
+  scene.add(key);
 }
 
 // 넓은 스튜디오 조명을 비춘 듯한 환경 반사.
@@ -186,19 +224,32 @@ export function createStudioEnvironment(renderer: THREE.WebGLRenderer): THREE.Te
 
 // 오브젝트 아래(뒤)로 은은하게 번지는 색 그림자. 한 번의 그리기로 모든 오브젝트를 처리하고,
 // 매 프레임 오브젝트 위치를 따라갑니다.
+export interface GlowPlacement {
+  // 오브젝트 크기(약 1) 기준 그림자 폭·높이, 오브젝트 중심에서 아래·뒤로 떨어진 거리
+  width: number;
+  height: number;
+  down: number;
+  back: number;
+}
+
+// 오브젝트 바로 아래에만 작고 납작하게: 번짐이 배경 전체로 퍼지지 않게
+export const CONTACT: GlowPlacement = { width: 1.1, height: 0.5, down: 0.48, back: 0.35 };
+
 export class GlowLayer {
   readonly mesh: THREE.InstancedMesh;
   private readonly dummy = new THREE.Object3D();
   private count = 0;
+  private sizes: number[] = [];
 
-  constructor(max: number) {
+  constructor(max: number, private readonly place: GlowPlacement = CONTACT) {
     const size = 128;
     const canvas = document.createElement("canvas");
     canvas.width = canvas.height = size;
     const g = canvas.getContext("2d")!;
     const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
     grad.addColorStop(0, "rgba(255,255,255,1)");
-    grad.addColorStop(0.45, "rgba(255,255,255,0.55)");
+    grad.addColorStop(0.35, "rgba(255,255,255,0.6)");
+    grad.addColorStop(0.7, "rgba(255,255,255,0.15)");
     grad.addColorStop(1, "rgba(255,255,255,0)");
     g.fillStyle = grad;
     g.fillRect(0, 0, size, size);
@@ -229,7 +280,9 @@ export class GlowLayer {
     this.mesh.count = 0;
   }
 
-  setColors(colors: number[]): void {
+  // sizes: 오브젝트마다 크기 배율 (없으면 1)
+  setColors(colors: number[], sizes: number[] = []): void {
+    this.sizes = sizes;
     this.count = Math.min(colors.length, this.mesh.instanceMatrix.count);
     const alpha = this.mesh.geometry.getAttribute("glowAlpha") as THREE.InstancedBufferAttribute;
     const c = new THREE.Color();
@@ -248,8 +301,10 @@ export class GlowLayer {
     const d = this.dummy;
     for (let i = 0; i < this.count; i++) {
       const p = positions[i];
-      d.position.set(p.x, p.y - 0.42, p.z - 0.7);
-      d.scale.set(1.9, 1.7, 1);
+      const k = this.sizes[i] ?? 1;
+      const pl = this.place;
+      d.position.set(p.x, p.y - pl.down * k, p.z - pl.back * k);
+      d.scale.set(pl.width * k, pl.height * k, 1);
       d.updateMatrix();
       this.mesh.setMatrixAt(i, d.matrix);
     }
