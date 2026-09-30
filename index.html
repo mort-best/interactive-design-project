@@ -27,10 +27,87 @@
         display: block;
         cursor: none;
       }
+      /* 3D를 띄우지 못했을 때만 보이는 안내 */
+      #status {
+        display: none;
+        position: fixed;
+        inset: 0;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        font: 15px/1.7 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+        color: #2b2b2b;
+        text-align: center;
+      }
+      #status.show {
+        display: flex;
+      }
+      #status div {
+        max-width: 460px;
+      }
+      #status code {
+        font-size: 12px;
+        color: #8a8378;
+        word-break: break-all;
+      }
     </style>
   </head>
   <body>
     <div id="app"></div>
+    <div id="status"><div id="status-text"></div></div>
+    <!--
+      일반 스크립트(모듈 아님): 메인 스크립트를 불러오지 못하거나 WebGL이 꺼져 있어도
+      실행되어, 빈 화면 대신 원인을 안내합니다. 정상일 때는 아무것도 표시하지 않습니다.
+    -->
+    <script>
+      (function () {
+        var lastError = "";
+        window.addEventListener(
+          "error",
+          function (e) {
+            var src = e.target && (e.target.src || e.target.href);
+            lastError = src ? "불러오기 실패: " + src : e.message || String(e.error || "");
+          },
+          true
+        );
+        window.addEventListener("unhandledrejection", function (e) {
+          lastError = String((e.reason && e.reason.message) || e.reason || "");
+        });
+
+        function hasWebGL() {
+          try {
+            var c = document.createElement("canvas");
+            return !!(c.getContext("webgl2") || c.getContext("webgl"));
+          } catch (err) {
+            return false;
+          }
+        }
+
+        function show(html) {
+          document.getElementById("status-text").innerHTML = html;
+          document.getElementById("status").className = "show";
+        }
+
+        window.addEventListener("load", function () {
+          setTimeout(function () {
+            if (document.querySelector("#app canvas")) return; // 정상 동작
+            if (!hasWebGL()) {
+              show(
+                "이 브라우저에서 3D 그래픽(WebGL)이 꺼져 있어 작품을 표시할 수 없습니다.<br><br>" +
+                  "Chrome 설정 → 시스템 → <b>'가능한 경우 그래픽 가속 사용'</b>을 켜고<br>" +
+                  "브라우저를 다시 시작한 뒤 이 페이지를 새로고침해 주세요."
+              );
+            } else {
+              show(
+                "작품을 불러오지 못했습니다.<br>" +
+                  "강력 새로고침(Mac: Cmd+Shift+R, Windows: Ctrl+Shift+R)을 해 주세요." +
+                  (lastError ? "<br><br><code>" + lastError.replace(/</g, "&lt;") + "</code>" : "")
+              );
+            }
+          }, 2500);
+        });
+      })();
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
