@@ -8,6 +8,9 @@ export class Pointer {
   readonly velocity = new THREE.Vector3();
   // 포인터가 화면 위에 있는지
   active = false;
+  // 마지막으로 마우스가 움직인 시각(performance.now 기준 ms).
+  // 손 입력에서 마우스로 넘어갈 때, 가만히 있던 커서가 갑자기 밀지 않도록 쓰입니다.
+  lastMoveTime = -Infinity;
 
   private readonly ndc = new THREE.Vector2();
   private hasNdc = false;
@@ -23,6 +26,7 @@ export class Pointer {
       this.ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
       this.hasNdc = true;
       this.active = true;
+      this.lastMoveTime = performance.now();
     };
     dom.addEventListener("pointermove", onMove);
     dom.addEventListener("pointerleave", () => {
