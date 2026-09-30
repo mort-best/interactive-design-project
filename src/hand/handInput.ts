@@ -154,8 +154,9 @@ export class HandInput {
     }
     if (this.presence === 0) this.needsReset = true;
 
-    // 검출 사이(약 33ms)에도 손이 멈춰 보이지 않도록 아주 짧게 앞으로 이어 그립니다.
-    const ahead = seen ? Math.min(now - this.lastSeen, HAND.extrapolateMs) / 1000 : 0;
+    // 마지막 결과는 카메라가 찍은 시점(lastFrameTime)의 손 위치이므로, 검출 처리 시간과
+    // 다음 결과까지의 공백만큼 손 속도로 짧게 앞질러 예측합니다(최대 extrapolateMs).
+    const ahead = seen ? Math.min(Math.max(0, now - this.lastFrameTime), HAND.extrapolateMs) / 1000 : 0;
     this.tracks.forEach((t, k) => {
       const c = this.colliders[k];
       c.x = t.x + t.vx * ahead;

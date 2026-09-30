@@ -13,9 +13,9 @@ export const BACKGROUND = 0xece7df; // 따뜻한 회백색
 
 // 격자 구성
 export const GRID = {
-  cols: 6,
+  cols: 9,
   rows: 4,
-  spacing: 2.2, // 오브젝트 사이 여백 (넉넉하게)
+  spacing: 1.5, // 오브젝트 중심 사이 거리 (오브젝트 크기 약 1)
 };
 
 // 물리/인터랙션 튜닝
@@ -58,10 +58,10 @@ export const HAND = {
 
   // 떨림 제거(One Euro 필터): minCutoff를 낮추면 더 매끈하지만 느려지고,
   // beta를 높이면 빠르게 휘두를 때 더 즉각적으로 따라옵니다.
-  minCutoff: 1.2,
-  beta: 0.25,
+  minCutoff: 1.6,
+  beta: 0.8,
   // 손 속도 스무딩(Hz). 높을수록 휘두름이 즉각 반영
-  velocityCutoff: 8,
+  velocityCutoff: 20,
   // 한 번의 오검출로 과도하게 튕기지 않도록 손 속도 상한 (월드/초)
   maxSpeed: 80,
   // 한 프레임 사이에 이보다 멀리 뛰면 순간이동으로 보고 속도를 0에서 다시 시작
@@ -72,9 +72,10 @@ export const HAND = {
   // 이보다 오래 끊겼다 돌아오면 새로 나타난 손으로 처리 (ms)
   reacquireGapMs: 350,
   // 손 입력을 켜고 끄는 데 걸리는 시간 (초) — 갑자기 튀지 않게
-  fadeIn: 0.2,
+  fadeIn: 0.12,
   fadeOut: 0.25,
-  // 검출 사이의 짧은 공백을 속도로 이어 그리는 최대 시간 (ms)
+  // 카메라가 프레임을 찍은 시점부터 지금까지(검출 처리 시간 포함)를
+  // 손 속도로 앞질러 예측하는 최대 시간 (ms). 검출 지연만큼 손이 뒤처져 보이지 않게 함
   extrapolateMs: 40,
 
   // 검출 빈도 (Hz). 검출이 무거운 기기에서는 자동으로 minDetectHz까지 낮춤

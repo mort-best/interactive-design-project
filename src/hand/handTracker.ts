@@ -221,7 +221,8 @@ export class HandTracker {
   // 검출이 무거운 기기에서는 검출 횟수를 줄여 CPU/GPU를 3D 애니메이션에 양보합니다.
   private adaptRate(): void {
     const c = this.detectCostMs;
-    const hz = c > 40 ? HAND.minDetectHz : c > 25 ? (HAND.minDetectHz + HAND.maxDetectHz) / 2 : HAND.maxDetectHz;
+    // 검출은 워커에서 돌아 화면을 막지 않으므로, 꽤 무거운 경우에만 빈도를 낮춥니다.
+    const hz = c > 60 ? HAND.minDetectHz : c > 35 ? (HAND.minDetectHz + HAND.maxDetectHz) / 2 : HAND.maxDetectHz;
     this.detectIntervalMs = 1000 / hz;
   }
 }

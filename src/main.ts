@@ -27,14 +27,27 @@ scene.background = new THREE.Color(BACKGROUND);
 // 격자 전체를 담을 수 있는 뷰 크기 계산
 const gridWidth = (GRID.cols - 1) * GRID.spacing;
 const gridHeight = (GRID.rows - 1) * GRID.spacing;
-const frustumHeight = Math.max(gridHeight, gridWidth * 0.6) + 4;
+// 화면 비율에 맞춰 격자(+그림자, 흩어질 여유)가 항상 다 보이도록 뷰 높이를 정합니다.
+// 가로가 넓은 화면에서는 높이 기준, 좁은 창에서는 폭 기준으로 맞춥니다.
+function viewHeight(aspect: number): number {
+  return Math.max(gridHeight + 5, (gridWidth + 3) / aspect);
+}
+
+function fitCamera(cam: THREE.OrthographicCamera): void {
+  const aspect = window.innerWidth / window.innerHeight;
+  const halfH = viewHeight(aspect) / 2;
+  const halfW = halfH * aspect;
+  cam.left = -halfW;
+  cam.right = halfW;
+  cam.top = halfH;
+  cam.bottom = -halfH;
+  cam.updateProjectionMatrix();
+}
 
 let camera: THREE.OrthographicCamera;
 function makeCamera(): THREE.OrthographicCamera {
-  const aspect = window.innerWidth / window.innerHeight;
-  const halfH = frustumHeight / 2;
-  const halfW = halfH * aspect;
-  const cam = new THREE.OrthographicCamera(-halfW, halfW, halfH, -halfH, 0.1, 100);
+  const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
+  fitCamera(cam);
   // 정면에서 약간 위에 두고 살짝 내려다봅니다.
   cam.position.set(0, 4.5, 18);
   cam.lookAt(0, -0.3, 0);
@@ -211,13 +224,6 @@ requestAnimationFrame(tick);
 
 // ---------- 리사이즈 ----------
 window.addEventListener("resize", () => {
-  const aspect = window.innerWidth / window.innerHeight;
-  const halfH = frustumHeight / 2;
-  const halfW = halfH * aspect;
-  camera.left = -halfW;
-  camera.right = halfW;
-  camera.top = halfH;
-  camera.bottom = -halfH;
-  camera.updateProjectionMatrix();
+  fitCamera(camera);
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
