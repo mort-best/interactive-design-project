@@ -2,3 +2,5 @@ node_modules
 dist
 *.local
 .DS_Store
+# npm run dev/build 때 node_modules에서 자동 복사됨
+public/mediapipe

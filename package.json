@@ -4,11 +4,15 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "copy-wasm": "node scripts/copy-mediapipe-wasm.mjs",
+    "predev": "npm run copy-wasm",
     "dev": "vite",
+    "prebuild": "npm run copy-wasm",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "1.0.1",
     "three": "^0.169.0"
   },
   "devDependencies": {

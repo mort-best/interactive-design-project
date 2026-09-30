@@ -41,8 +41,27 @@ src/
   shapes.ts      # 세 형태(구/둥근 큐브/링)의 지오메트리와 무광 소재
   gridObject.ts  # 오브젝트 하나의 스프링 복원 + 감쇠 + 충격 물리
   pointer.ts     # 마우스를 월드 평면에 투영, 프레임레이트 독립 속도 계산
-  main.ts        # 씬/직교 카메라/조명/그림자/격자 배치/애니메이션 루프
+  interaction.ts # 충돌 영역(마우스/손) → 오브젝트에 힘을 주는 공통 로직
+  hand/          # 웹캠 손 추적 (아래 참고)
+  main.ts        # 씬/직교 카메라/조명/그림자/격자 배치/입력 선택/애니메이션 루프
+public/models/   # MediaPipe 손 모델 (hand_landmarker.task)
+scripts/         # npm run dev/build 전에 MediaPipe WASM을 public/mediapipe/ 로 복사
 ```
+
+## 웹캠 손 추적
+
+화면 왼쪽 아래 **카메라 시작**을 누르면 MediaPipe Hand Landmarker로 한 손을 추적합니다.
+
+- 손바닥 중심과 손가락 끝 5개에 보이지 않는 충돌 영역이 있고, 마우스와 같은 힘 계산을 씁니다(`interaction.ts`).
+- 카메라 좌표는 거울처럼 좌우 반전됩니다. 떨림은 One Euro 필터로 줄입니다(`HAND` 설정, `config.ts`).
+- 손이 보이면 손 입력만 쓰고, 안 보이면 마우스를 씁니다. 손이 사라진 뒤에는 마우스를 다시 움직여야 마우스 입력이 켜집니다.
+- 손이 나타나거나 사라질 때는 힘을 0.2~0.25초에 걸쳐 서서히 켜고 끕니다.
+- 검출은 Web Worker에서 실행되어 3D 애니메이션을 막지 않고, 느린 기기에서는 검출 빈도를 30→15Hz로 낮춥니다.
+- 영상은 브라우저 안에서만 처리되고 전송·저장되지 않습니다. 모델과 WASM도 이 사이트에서 불러옵니다.
+  단, MediaPipe 라이브러리 자체가 성능·사용량 지표(영상 아님)를 Google에 보낼 수 있다고 안내하고 있습니다
+  (`node_modules/@mediapipe/tasks-vision/README.md`의 Privacy Notice).
+- 카메라 권한을 거부하거나 카메라가 없어도 마우스로 그대로 체험할 수 있습니다.
+- 주소 끝에 `?delegate=cpu`를 붙이면 GPU 대신 CPU로 검출합니다(확인용).
 
 ## 인터랙션 구현 메모
 

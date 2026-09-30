@@ -3,6 +3,10 @@ import { BACKGROUND, GRID, PHYSICS } from "./config";
 import { colorForIndex, createMaterial, getGeometry, shapeForIndex } from "./shapes";
 import { GridObject } from "./gridObject";
 import { Pointer } from "./pointer";
+import { applyColliders, type Collider } from "./interaction";
+import { HandTracker } from "./hand/handTracker";
+import { HandInput } from "./hand/handInput";
+import { HandUI } from "./hand/ui";
 
 const app = document.getElementById("app")!;
 
@@ -111,57 +115,53 @@ for (let r = 0; r < GRID.rows; r++) {
 // ---------- 포인터 ----------
 const pointer = new Pointer(camera, renderer.domElement);
 
-// ---------- 인터랙션: 마우스 주변 오브젝트에 충격 적용 ----------
-const tmpDir = new THREE.Vector3();
-const tmpSpin = new THREE.Vector3();
+// ---------- 손 추적 (웹캠) ----------
+const tracker = new HandTracker();
+const hand = new HandInput(camera);
+const ui = new HandUI(
+  tracker.video,
+  () => void tracker.start(),
+  () => tracker.stop()
+);
+tracker.onStatus = (s) => {
+  ui.setStatus(s);
+  if (s !== "running") hand.reset();
+};
+tracker.onFrame = (f) => {
+  hand.onFrame(f, tracker.video.videoWidth, tracker.video.videoHeight);
+  ui.drawLandmarks(f.landmarks);
+};
+// 페이지를 떠날 때도 카메라를 확실히 끔
+window.addEventListener("pagehide", () => tracker.stop());
 
-function applyInteraction(dt: number): void {
-  if (!pointer.active) return;
+// ---------- 입력 선택: 손이 보이면 손, 아니면 마우스 (힘이 겹치지 않게) ----------
+const mouseCollider: Collider = { x: 0, y: 0, vx: 0, vy: 0, radius: PHYSICS.influenceRadius, weight: 1 };
+let handLastActive = -Infinity;
+let inputSource: "none" | "mouse" | "hand" = "none";
 
-  const speed = pointer.velocity.length(); // 월드/초
-  const px = pointer.world.x;
-  const py = pointer.world.y;
-  const radius = PHYSICS.influenceRadius;
-  const radiusSq = radius * radius;
-
-  for (const obj of objects) {
-    const p = obj.position;
-    const dx = p.x - px;
-    const dy = p.y - py;
-    const distSq = dx * dx + dy * dy;
-    if (distSq > radiusSq) continue; // 영향 범위 밖 -> 움직이지 않음
-
-    const dist = Math.sqrt(distSq) || 0.0001;
-    // 가까울수록 강하게 (부드러운 감쇠)
-    const falloff = 1 - dist / radius;
-    const soft = falloff * falloff;
-
-    // 기본은 포인터에서 바깥으로 밀어냄
-    tmpDir.set(dx / dist, dy / dist, 0);
-
-    // 빠르게 움직이면 이동 방향 성분을 더해 더 강하게 밀고 회전을 줌
-    // gentleSpeed 이하의 느린 움직임은 기본 힘만으로 부드럽게 밀고, 그보다 빠른 만큼만 힘을 더합니다.
-    const velContribution = Math.max(0, speed - PHYSICS.gentleSpeed) * PHYSICS.velocityStrength;
-    tmpDir.x += (pointer.velocity.x / (speed || 1)) * (velContribution / PHYSICS.pushStrength);
-    tmpDir.y += (pointer.velocity.y / (speed || 1)) * (velContribution / PHYSICS.pushStrength);
-    tmpDir.normalize();
-
-    const strength = (PHYSICS.pushStrength + velContribution) * soft * dt;
-
-    // 회전 충격: 속도가 빠를수록, 가까울수록 크게. 무작위성으로 흩어지는 느낌.
-    const spinMag = (PHYSICS.spinStrength * (0.4 + speed) * soft) * dt;
-    tmpSpin.set(
-      (Math.random() - 0.5) * spinMag,
-      (Math.random() - 0.5) * spinMag,
-      (Math.random() - 0.5) * spinMag * 1.5
-    );
-
-    obj.applyImpulse(tmpDir, strength, tmpSpin);
+function currentColliders(now: number): Collider[] {
+  if (hand.active) {
+    handLastActive = now;
+    inputSource = "hand";
+    return hand.colliders;
   }
+  // 손 입력이 끝난 뒤에는 마우스를 새로 움직였을 때만 다시 마우스를 사용
+  // (가만히 있던 커서가 손이 사라지는 순간 갑자기 밀지 않도록)
+  if (pointer.active && pointer.lastMoveTime > handLastActive) {
+    mouseCollider.x = pointer.world.x;
+    mouseCollider.y = pointer.world.y;
+    mouseCollider.vx = pointer.velocity.x;
+    mouseCollider.vy = pointer.velocity.y;
+    inputSource = "mouse";
+    return [mouseCollider];
+  }
+  inputSource = "none";
+  return [];
 }
 
 // ---------- 애니메이션 루프 (프레임레이트 독립) ----------
 const clock = new THREE.Clock();
+let frameCount = 0;
 
 function tick(): void {
   // 실제 경과 시간만큼 시뮬레이션을 진행합니다. 느린 기기에서도 움직임 속도가 같도록
@@ -169,14 +169,21 @@ function tick(): void {
   const frameDt = Math.min(clock.getDelta(), PHYSICS.maxDelta);
   const steps = Math.max(1, Math.ceil(frameDt / PHYSICS.stepSize));
   const h = frameDt / steps;
+  const now = performance.now();
 
   pointer.update(frameDt);
+  hand.update(now, frameDt);
+  ui.setHandSeen(tracker.status === "running" && now - hand.lastSeen < 300);
+  const colliders = currentColliders(now);
   for (let s = 0; s < steps; s++) {
-    applyInteraction(h);
+    applyColliders(objects, colliders, h);
     for (const obj of objects) obj.update(h);
   }
 
   renderer.render(scene, camera);
+  frameCount++;
+  // 렌더링을 먼저 끝낸 뒤 손 검출 (새 카메라 프레임이 있고 검출 간격이 지났을 때만)
+  tracker.maybeDetect(performance.now());
   requestAnimationFrame(tick);
 }
 requestAnimationFrame(tick);
@@ -188,6 +195,18 @@ requestAnimationFrame(tick);
     objects.map((o) => o.position.distanceTo(o.worldHome)),
   poke: (i: number, fx: number, fy: number) =>
     objects[i]?.applyImpulse(new THREE.Vector3(fx, fy, 0).normalize(), Math.hypot(fx, fy), new THREE.Vector3(0.5, 0.5, 1)),
+  hand: () => ({
+    status: tracker.status,
+    delegate: tracker.delegate,
+    detectCostMs: +tracker.detectCostMs.toFixed(1),
+    detectHz: +(1000 / tracker.detectIntervalMs).toFixed(0),
+    liveTracks: tracker.liveTrackCount,
+    presence: +hand.presence.toFixed(2),
+    input: inputSource,
+    palm: { x: +hand.colliders[0].x.toFixed(2), y: +hand.colliders[0].y.toFixed(2) },
+    palmSpeed: +Math.hypot(hand.colliders[0].vx, hand.colliders[0].vy).toFixed(1),
+    frames: frameCount,
+  }),
 };
 
 // ---------- 리사이즈 ----------
