@@ -26,7 +26,7 @@ const CSS = `
   display: inline-block; width: 7px; height: 7px; border-radius: 50%;
   margin-right: 6px; vertical-align: 1px; background: #b8b1a5;
 }
-.hand-ui .dot.on { background: #2f5aa8; }
+.hand-ui .dot.on { background: #ee7a24; }
 .hand-preview {
   position: fixed; right: 16px; bottom: 16px; z-index: 10;
   width: 200px; aspect-ratio: 4 / 3; border-radius: 10px; overflow: hidden;
@@ -139,7 +139,7 @@ export class HandUI {
       ctx.lineTo(landmarks[b].x * w, landmarks[b].y * h);
     }
     ctx.stroke();
-    for (const [i, color] of [[0, "#2f5aa8"], [4, "#d6483b"], [8, "#d6483b"], [12, "#d6483b"], [16, "#d6483b"], [20, "#d6483b"]] as const) {
+    for (const [i, color] of [[0, "#f6c643"], [4, "#ee7a24"], [8, "#ee7a24"], [12, "#ee7a24"], [16, "#ee7a24"], [20, "#ee7a24"]] as const) {
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.arc(landmarks[i].x * w, landmarks[i].y * h, 4, 0, Math.PI * 2);

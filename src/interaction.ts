@@ -20,7 +20,8 @@ const tmpSpin = new THREE.Vector3();
 // 각 오브젝트마다 가장 강하게 닿은 충돌 영역 하나의 힘만 적용합니다.
 // (손가락 여러 개가 한 오브젝트에 겹쳐도 힘이 몇 배로 커지지 않아,
 //  마우스와 같은 흩어짐 느낌이 유지됩니다.)
-export function applyColliders(objects: GridObject[], colliders: Collider[], dt: number): void {
+// fromHand: 손 입력이면 밀린 오브젝트를 '손에 밀림'으로 표시 (부딪힘 계산용)
+export function applyColliders(objects: GridObject[], colliders: Collider[], dt: number, fromHand = false): void {
   if (colliders.length === 0) return;
 
   for (const obj of objects) {
@@ -74,5 +75,6 @@ export function applyColliders(objects: GridObject[], colliders: Collider[], dt:
     );
 
     obj.applyImpulse(tmpDir, strength, tmpSpin);
+    if (fromHand) obj.markHand();
   }
 }

@@ -6,14 +6,8 @@ export type ShapeKind = "sphere" | "roundedCube" | "ring";
 
 const SHAPE_ORDER: ShapeKind[] = ["sphere", "roundedCube", "ring"];
 
-// 제한된 팔레트 (배경과 대비되는 색만 사용)
-const COLOR_CYCLE = [
-  PALETTE.ink,
-  PALETTE.red,
-  PALETTE.blue,
-  PALETTE.yellow,
-  PALETTE.ivory,
-];
+// 할로윈 팔레트
+const COLOR_CYCLE = [PALETTE.pumpkin, PALETTE.cream, PALETTE.ink, PALETTE.yellow];
 
 export interface CellStyle {
   kind: ShapeKind;
@@ -38,7 +32,7 @@ export function styleForCell(r: number, c: number, left?: CellStyle, top?: CellS
     if (kind !== left?.kind && kind !== top?.kind) break;
   }
   const c0 = hash(r, c, 2) % COLOR_CYCLE.length;
-  let color = COLOR_CYCLE[c0];
+  let color: number = COLOR_CYCLE[c0];
   for (let k = 0; k < COLOR_CYCLE.length; k++) {
     color = COLOR_CYCLE[(c0 + k) % COLOR_CYCLE.length];
     if (color !== left?.color && color !== top?.color) break;
@@ -49,65 +43,53 @@ export function styleForCell(r: number, c: number, left?: CellStyle, top?: CellS
 // 지오메트리는 형태별로 한 번만 만들어 공유합니다(성능).
 const geometryCache = new Map<ShapeKind, THREE.BufferGeometry>();
 
-// 둥근 큐브: 세그먼트가 많은 박스를 구면으로 살짝 부풀려 모서리를 둥글게 만듭니다.
-function createRoundedCubeGeometry(size: number, radius: number): THREE.BufferGeometry {
-  const geo = new THREE.BoxGeometry(size, size, size, 8, 8, 8);
+// 둥근 큐브: 박스의 각 점을 안쪽 작은 상자에서 radius만큼 떨어진 곳으로 옮겨 모서리를 둥글게 합니다.
+// 법선도 같은 방향으로 직접 넣어서, 광택이 있어도 면 사이에 이음새가 보이지 않습니다.
+function createRoundedCubeGeometry(size: number, radius: number, segments: number): THREE.BufferGeometry {
+  const geo = new THREE.BoxGeometry(size, size, size, segments, segments, segments);
   const pos = geo.attributes.position as THREE.BufferAttribute;
-  const half = size / 2;
-  const inner = half - radius;
+  const nor = geo.attributes.normal as THREE.BufferAttribute;
+  const inner = size / 2 - radius;
   const v = new THREE.Vector3();
 
   for (let i = 0; i < pos.count; i++) {
     v.fromBufferAttribute(pos, i);
-    // 각 축을 안쪽 코어 영역으로 클램프한 지점을 중심으로 반지름만큼 밀어냅니다.
     const cx = THREE.MathUtils.clamp(v.x, -inner, inner);
     const cy = THREE.MathUtils.clamp(v.y, -inner, inner);
     const cz = THREE.MathUtils.clamp(v.z, -inner, inner);
-    const dx = v.x - cx;
-    const dy = v.y - cy;
-    const dz = v.z - cz;
+    let dx = v.x - cx;
+    let dy = v.y - cy;
+    let dz = v.z - cz;
     const len = Math.hypot(dx, dy, dz) || 1;
-    v.set(
-      cx + (dx / len) * radius,
-      cy + (dy / len) * radius,
-      cz + (dz / len) * radius
-    );
-    pos.setXYZ(i, v.x, v.y, v.z);
+    dx /= len;
+    dy /= len;
+    dz /= len;
+    pos.setXYZ(i, cx + dx * radius, cy + dy * radius, cz + dz * radius);
+    nor.setXYZ(i, dx, dy, dz);
   }
-  geo.computeVertexNormals();
+  pos.needsUpdate = true;
+  nor.needsUpdate = true;
   return geo;
 }
 
+// 말랑하고 볼륨감 있게: 큐브는 더 둥글게, 링은 더 도톰하게. 전체 크기는 이전과 같게(약 1).
+// 넓은 하이라이트가 매끈하게 흐르도록 면 수는 충분히 둡니다.
 export function getGeometry(kind: ShapeKind): THREE.BufferGeometry {
   const cached = geometryCache.get(kind);
   if (cached) return cached;
 
   let geo: THREE.BufferGeometry;
   switch (kind) {
-    // 오브젝트가 많고 화면에서 작게 보이므로, 모양은 같게 두고 면 수만 줄였습니다(성능).
     case "sphere":
-      geo = new THREE.SphereGeometry(0.5, 32, 20);
+      geo = new THREE.SphereGeometry(0.5, 40, 28);
       break;
     case "roundedCube":
-      geo = createRoundedCubeGeometry(0.95, 0.22);
+      geo = createRoundedCubeGeometry(0.94, 0.3, 10);
       break;
     case "ring":
-      // 도넛(토러스)을 링으로 사용
-      geo = new THREE.TorusGeometry(0.42, 0.16, 16, 40);
+      geo = new THREE.TorusGeometry(0.36, 0.2, 20, 48);
       break;
   }
   geometryCache.set(kind, geo);
   return geo;
-}
-
-// 무광(러프니스 높은) 소재. 색마다 하나씩 만들어 모든 오브젝트가 공유합니다.
-const materialCache = new Map<number, THREE.MeshStandardMaterial>();
-
-export function getMaterial(color: number): THREE.MeshStandardMaterial {
-  let m = materialCache.get(color);
-  if (!m) {
-    m = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.0 });
-    materialCache.set(color, m);
-  }
-  return m;
 }

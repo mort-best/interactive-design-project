@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { HAND, PHYSICS } from "./config";
+import { COLLIDE, HAND, PHYSICS } from "./config";
 
 // 격자 위의 한 오브젝트. 원래 위치/회전을 기억하고,
 // 스프링 + 감쇠로 그곳으로 탄성 있게 돌아옵니다.
@@ -25,6 +25,9 @@ export class GridObject {
   private reachOverride = 0;
   private held = false;
 
+  // 손이 마지막으로 이 오브젝트를 민 뒤 지난 시간(초) — 부딪힘 계산 대상인지 판단
+  private timeSinceHand = Infinity;
+
   constructor(mesh: THREE.Mesh, home: THREE.Vector3) {
     this.mesh = mesh;
     this.home = home.clone();
@@ -47,6 +50,7 @@ export class GridObject {
 
   update(dt: number): void {
     this.timeSincePush += dt;
+    this.timeSinceHand += dt;
 
     // 복귀 지연: 최근에 밀렸다면 잠깐은 스프링 복원력을 약하게 둡니다.
     const returning = this.timeSincePush >= PHYSICS.returnDelay;
@@ -121,6 +125,29 @@ export class GridObject {
     this.reachOverride = Math.max(this.reachOverride, this.offset.length() + 0.2);
     this.held = true;
     this.timeSincePush = 0; // 손이 떠난 뒤 잠깐 멈췄다가 천천히 돌아오도록
+    this.timeSinceHand = 0;
+  }
+
+  // 손이 이 오브젝트를 밀었음을 기록
+  markHand(): void {
+    this.timeSinceHand = 0;
+  }
+
+  // 최근 손에 밀려 부딪힘을 계산해야 하는 오브젝트인지
+  get handDriven(): boolean {
+    return this.timeSinceHand < COLLIDE.handMemory;
+  }
+
+  get vel(): THREE.Vector3 {
+    return this.velocity;
+  }
+
+  // 부딪힘으로 속도와 회전을 조금 바꿉니다. (복귀 지연은 건드리지 않아 부딪힌 쪽은 곧 제자리로 돌아감)
+  nudge(dvx: number, dvy: number, spinZ: number): void {
+    this.velocity.x += dvx;
+    this.velocity.y += dvy;
+    this.rotVelocity.z += spinZ;
+    this.rotVelocity.x += spinZ * 0.3;
   }
 
   private syncMesh(): void {

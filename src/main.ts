@@ -1,27 +1,41 @@
 import * as THREE from "three";
-import { BACKGROUND, GRID, HAND, PHYSICS } from "./config";
-import { getGeometry, getMaterial, styleForCell, type CellStyle } from "./shapes";
+import { BACKGROUND, COLLIDE, GRID, HAND, PHYSICS } from "./config";
+import { getGeometry, styleForCell, type CellStyle } from "./shapes";
+import { createStudioEnvironment, getMaterial, GlowLayer, type Quality } from "./look";
 import { GridObject } from "./gridObject";
 import { Pointer } from "./pointer";
 import { applyColliders, type Collider } from "./interaction";
 import { HandTracker } from "./hand/handTracker";
 import { HandInput } from "./hand/handInput";
 import { applyHandExclusion } from "./hand/handShape";
+import { resolveCollisions } from "./collisions";
 import { HandUI } from "./hand/ui";
 
 const app = document.getElementById("app")!;
 
 // ---------- 렌더러 ----------
-// 그림자는 쓰지 않습니다(오브젝트가 화면을 채우므로 움직임 자체가 잘 보이도록).
+// 딱딱한 그림자는 쓰지 않고, 오브젝트 아래에 색이 번지는 부드러운 그림자만 둡니다.
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setClearColor(BACKGROUND, 1);
+// 색을 과하게 바꾸지 않는 톤 매핑: 호박색·노랑이 탁해지지 않고 하이라이트만 부드럽게 눌러 줌
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.toneMappingExposure = 1.0;
 app.appendChild(renderer.domElement);
 
 // ---------- 씬 ----------
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(BACKGROUND);
+// 넓은 스튜디오 조명이 비친 듯한 환경 반사
+scene.environment = createStudioEnvironment(renderer);
+
+// ---------- 재질 품질 ----------
+// 기본은 반투명(high). 처음 몇 초 동안 프레임이 느리면 가벼운 재질(light)로 자동 전환.
+// 주소에 ?quality=high 또는 ?quality=light 를 붙이면 고정.
+const qualityParam = new URLSearchParams(location.search).get("quality");
+let quality: Quality = qualityParam === "light" ? "light" : "high";
+const autoQuality = qualityParam !== "high" && qualityParam !== "light";
 
 // ---------- 격자 크기: 창을 가득 채우는 행·열 수 ----------
 interface Layout {
@@ -64,25 +78,25 @@ camera.position.copy(CAMERA_POS);
 camera.lookAt(0, 0, 0);
 fitCamera(camera);
 
-// ---------- 조명 (넓고 부드럽게) ----------
-scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-scene.add(new THREE.HemisphereLight(0xfff6e8, 0xcfc7ba, 0.6));
-
-const key = new THREE.DirectionalLight(0xfff4e2, 1.15);
-key.position.set(6, 14, 10);
+// ---------- 조명: 대부분 환경 반사로 밝히고, 직사광은 약하게 ----------
+scene.add(new THREE.HemisphereLight(0xfff4e6, 0xf2d6b8, 0.55));
+const key = new THREE.DirectionalLight(0xfff2e2, 0.55);
+key.position.set(-5, 9, 12);
 scene.add(key);
 
-// 채움광(약하게)
-const fill = new THREE.DirectionalLight(0xe8ecff, 0.35);
-fill.position.set(-8, 4, 6);
-scene.add(fill);
+// ---------- 색이 번지는 접촉 그림자 ----------
+const glow = new GlowLayer(GRID.maxObjects + 64);
+scene.add(glow.mesh);
 
 // ---------- 격자 배치 ----------
 const objects: GridObject[] = [];
 
+const objectColors: number[] = [];
+
 function buildGrid(): void {
   for (const o of objects) scene.remove(o.mesh); // 지오메트리·소재는 공유라 그대로 둠
   objects.length = 0;
+  objectColors.length = 0;
 
   const { cols, rows } = layout;
   const startX = (-(cols - 1) * GRID.spacing) / 2;
@@ -94,7 +108,8 @@ function buildGrid(): void {
     for (let c = 0; c < cols; c++) {
       const style = styleForCell(r, c, styles[r][c - 1], styles[r - 1]?.[c]);
       styles[r][c] = style;
-      const mesh = new THREE.Mesh(getGeometry(style.kind), getMaterial(style.color));
+      const mesh = new THREE.Mesh(getGeometry(style.kind), getMaterial(style.color, quality));
+      objectColors.push(style.color);
       // 링은 정면을 향하도록 살짝 세워 둡니다.
       if (style.kind === "ring") mesh.rotation.x = Math.PI / 2;
 
@@ -103,8 +118,37 @@ function buildGrid(): void {
       scene.add(mesh);
     }
   }
+  glow.setColors(objectColors);
 }
 buildGrid();
+
+function applyPixelRatio(): void {
+  // 가벼운 모드에서는 고해상도 화면의 픽셀 수를 조금 줄임 (윤곽은 여전히 선명한 수준)
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, quality === "light" ? 1.5 : 2));
+}
+applyPixelRatio();
+
+function setQuality(q: Quality): void {
+  if (q === quality) return;
+  quality = q;
+  objects.forEach((o, i) => (o.mesh.material = getMaterial(objectColors[i], q)));
+  applyPixelRatio();
+}
+
+// 반투명 재질이 이 기기에서 무거운지 확인: 시작 직후 잠깐 기다린 뒤 약 1.5초간 프레임 간격을 봄
+const perf = { start: performance.now(), samples: [] as number[], decided: !autoQuality, medianMs: 0 };
+function checkQuality(rawDtMs: number, now: number): void {
+  if (perf.decided || document.hidden) return;
+  if (now - perf.start < 1000) return;
+  perf.samples.push(rawDtMs);
+  // 90프레임을 모으거나(빠른 기기), 2초가 지나면(느린 기기) 판단
+  if (perf.samples.length < 90 && !(now - perf.start > 3000 && perf.samples.length >= 5)) return;
+  const sorted = [...perf.samples].sort((a, b) => a - b);
+  perf.medianMs = sorted[sorted.length >> 1];
+  perf.decided = true;
+  // 약 40fps보다 느리면 가벼운 재질로
+  if (perf.medianMs > 25) setQuality("light");
+}
 
 // ---------- 포인터 ----------
 const pointer = new Pointer(camera, renderer.domElement);
@@ -160,10 +204,12 @@ let frameCount = 0;
 function tick(): void {
   // 실제 경과 시간만큼 시뮬레이션을 진행합니다. 느린 기기에서도 움직임 속도가 같도록
   // 한 프레임을 작은 단계(stepSize)로 나눠 계산하고, 탭 전환 후의 큰 점프만 maxDelta로 막습니다.
-  const frameDt = Math.min(clock.getDelta(), PHYSICS.maxDelta);
+  const rawDt = clock.getDelta();
+  const frameDt = Math.min(rawDt, PHYSICS.maxDelta);
   const steps = Math.max(1, Math.ceil(frameDt / PHYSICS.stepSize));
   const h = frameDt / steps;
   const now = performance.now();
+  checkQuality(rawDt * 1000, now);
 
   pointer.update(frameDt);
   hand.update(now, frameDt);
@@ -171,12 +217,15 @@ function tick(): void {
   const colliders = currentColliders(now);
   const handBlocks = tracker.status === "running" && hand.shape.strength > 0;
   for (let s = 0; s < steps; s++) {
-    applyColliders(objects, colliders, h);
+    applyColliders(objects, colliders, h, inputSource === "hand");
     for (const obj of objects) obj.update(h);
     // 손이 있는 자리에는 들어오지 못하게 밀어냄 (스프링이 끌어당겨도 손 밖에 머묾)
     if (handBlocks && HAND.exclusion) applyHandExclusion(objects, hand.shape, h);
+    // 손에 밀린 오브젝트가 다른 오브젝트와 부딪히면 서로 살짝 밀어냄
+    resolveCollisions(objects, h);
   }
 
+  glow.update(objects.map((o) => o.position));
   renderer.render(scene, camera);
   frameCount++;
   // 렌더링을 먼저 끝낸 뒤 손 검출 (새 카메라 프레임이 있고 검출 간격이 지났을 때만)
@@ -209,6 +258,10 @@ requestAnimationFrame(tick);
       }
     }
     return { strength: +hand.shape.strength.toFixed(2), centersInside, touching, maxOverlap: +maxOverlap.toFixed(3) };
+  },
+  quality: () => ({ quality, auto: autoQuality, decided: perf.decided, medianFrameMs: +perf.medianMs.toFixed(1) }),
+  setCollisions: (on: boolean) => {
+    COLLIDE.enabled = on;
   },
   setHandExclusion: (on: boolean) => {
     HAND.exclusion = on;

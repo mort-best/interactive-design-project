@@ -1,15 +1,14 @@
 // 작품 전반의 튜닝 값과 제한된 색상 팔레트를 한 곳에 모아 둡니다.
 
-// 제한된 색상: 아이보리, 먹색, 빨강, 파랑, 노랑
+// 할로윈 팔레트: 호박색, 크림색, 짙은 먹색, 노랑
 export const PALETTE = {
-  ivory: 0xf2ede1,
-  ink: 0x2b2b2b,
-  red: 0xd6483b,
-  blue: 0x2f5aa8,
-  yellow: 0xe8b23a,
+  pumpkin: 0xee7a24,
+  cream: 0xf4e4c4,
+  ink: 0x2a2320,
+  yellow: 0xf6c643,
 } as const;
 
-export const BACKGROUND = 0xece7df; // 따뜻한 회백색
+export const BACKGROUND = 0xf6eddc; // 따뜻한 크림색
 
 // 격자 구성
 // 격자 구성: 창 크기에 맞춰 화면을 가득 채우도록 행·열 수를 계산합니다.
@@ -53,6 +52,25 @@ export const PHYSICS = {
   maxDelta: 0.1,
   // 계산 단위 시간(초). 프레임이 느려도 이 간격으로 나눠 계산해 움직임 속도가 같게 유지됩니다.
   stepSize: 1 / 120,
+};
+
+// 손에 밀린 오브젝트가 다른 오브젝트와 부딪힐 때
+export const COLLIDE = {
+  enabled: true,
+  // 오브젝트를 원으로 볼 때의 반지름 (오브젝트 크기 약 1)
+  radius: 0.5,
+  // 손이 마지막으로 민 뒤 이 시간(초) 동안은 '손에 밀린 오브젝트'로 보고 부딪힘을 계산
+  handMemory: 1.5,
+  // 부딪힌(손이 직접 밀지 않은) 오브젝트의 상대 무게. 클수록 조금만 움직임
+  hitMass: 8,
+  // 겹친 깊이 1당 서로 떨어지는 속도 (1/초). 작을수록 말랑하게 겹쳤다가 떨어짐
+  push: 3,
+  // 부딪힐 때 튕기는 정도 (0~1)
+  restitution: 0.15,
+  // 비껴 부딪힐 때 회전하는 정도
+  spin: 0.4,
+  // 부딪힘을 풀어 주는 빠르기 (1/초). 작을수록 말랑하게 겹쳤다가 천천히 떨어짐
+  response: 15,
 };
 
 // 웹캠 손 추적 튜닝
