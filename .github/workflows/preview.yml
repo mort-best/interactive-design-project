@@ -16,7 +16,7 @@ on:
 
 env:
   # 미리보기로 올릴 PR 번호 (공백으로 구분, 예: "3 4")
-  PREVIEW_PRS: "3"
+  PREVIEW_PRS: "4"
 
 permissions:
   contents: read
