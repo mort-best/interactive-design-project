@@ -1,11 +1,12 @@
 import * as THREE from "three";
-import { BACKGROUND, GRID, PHYSICS } from "./config";
+import { BACKGROUND, GRID, HAND, PHYSICS } from "./config";
 import { getGeometry, getMaterial, styleForCell, type CellStyle } from "./shapes";
 import { GridObject } from "./gridObject";
 import { Pointer } from "./pointer";
 import { applyColliders, type Collider } from "./interaction";
 import { HandTracker } from "./hand/handTracker";
 import { HandInput } from "./hand/handInput";
+import { applyHandExclusion } from "./hand/handShape";
 import { HandUI } from "./hand/ui";
 
 const app = document.getElementById("app")!;
@@ -168,9 +169,12 @@ function tick(): void {
   hand.update(now, frameDt);
   ui.setHandSeen(tracker.status === "running" && now - hand.lastSeen < 300);
   const colliders = currentColliders(now);
+  const handBlocks = inputSource === "hand";
   for (let s = 0; s < steps; s++) {
     applyColliders(objects, colliders, h);
     for (const obj of objects) obj.update(h);
+    // 손이 있는 자리에는 들어오지 못하게 밀어냄 (스프링이 끌어당겨도 손 밖에 머묾)
+    if (handBlocks && HAND.exclusion) applyHandExclusion(objects, hand.shape, h);
   }
 
   renderer.render(scene, camera);
@@ -188,6 +192,28 @@ requestAnimationFrame(tick);
     objects.map((o) => o.position.distanceTo(o.worldHome)),
   spins: () => objects.map((o) => o.spinAmount),
   layout: () => ({ ...layout, count: objects.length }),
+  // 손 영역과 겹친 정도: 중심이 손 안에 있는 개수, 오브젝트(반지름 objectRadius)가 가장 깊이 겹친 거리
+  handOverlap: () => {
+    let centersInside = 0;
+    let maxOverlap = 0;
+    let touching = 0;
+    if (hand.shape.strength > 0) {
+      for (const o of objects) {
+        const d = hand.shape.distance(o.position.x, o.position.y);
+        if (d < 0) centersInside++;
+        const overlap = HAND.objectRadius - d;
+        if (overlap > 0) {
+          touching++;
+          maxOverlap = Math.max(maxOverlap, overlap);
+        }
+      }
+    }
+    return { strength: +hand.shape.strength.toFixed(2), centersInside, touching, maxOverlap: +maxOverlap.toFixed(3) };
+  },
+  setHandExclusion: (on: boolean) => {
+    HAND.exclusion = on;
+  },
+
   poke: (i: number, fx: number, fy: number) =>
     objects[i]?.applyImpulse(new THREE.Vector3(fx, fy, 0).normalize(), Math.hypot(fx, fy), new THREE.Vector3(0.5, 0.5, 1)),
   hand: () => ({

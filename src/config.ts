@@ -83,6 +83,17 @@ export const HAND = {
   // 손 속도로 앞질러 예측하는 최대 시간 (ms). 검출 지연만큼 손이 뒤처져 보이지 않게 함
   extrapolateMs: 40,
 
+  // 손이 있는 자리에는 오브젝트가 들어오지 못하게 함
+  exclusion: true,
+  // 손가락 굵기(반지름) = 손 크기(손목~중지 뿌리 길이) × 이 비율
+  fingerWidthRatio: 0.14,
+  // 오브젝트를 원으로 볼 때의 반지름 (오브젝트 크기 약 1)
+  objectRadius: 0.5,
+  // 밀어낼 방향을 구하는 거리 지도의 칸 크기 (월드 단위). 작을수록 손 모양이 정확함
+  mapCell: 0.1,
+  // 손 영역 밖으로 밀어내는 최대 속도 (월드/초). 순간이동처럼 보이지 않게 하는 상한
+  exclusionSpeed: 60,
+
   // 검출 빈도 (Hz). 검출이 무거운 기기에서는 자동으로 minDetectHz까지 낮춤
   maxDetectHz: 30,
   minDetectHz: 15,

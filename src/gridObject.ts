@@ -21,6 +21,10 @@ export class GridObject {
   // 마지막으로 힘을 받은 이후 경과 시간 (복귀 지연 판단용)
   private timeSincePush = Infinity;
 
+  // 손이 막고 있을 때 최대 변위 한계를 넘어도 되는 거리, 그리고 이번 단계에 손에 막혔는지
+  private reachOverride = 0;
+  private held = false;
+
   constructor(mesh: THREE.Mesh, home: THREE.Vector3) {
     this.mesh = mesh;
     this.home = home.clone();
@@ -62,8 +66,12 @@ export class GridObject {
     this.offset.y += this.velocity.y * dt;
     this.offset.z += this.velocity.z * dt;
 
-    // 화면 밖으로 영구히 사라지지 않도록 최대 변위 제한
-    const maxD = PHYSICS.maxDisplacement;
+    // 화면 밖으로 영구히 사라지지 않도록 최대 변위 제한.
+    // 손이 막고 있는 동안에는 손 밖 자리까지 허용하고, 손이 떠나면 한계를 서서히 되돌려
+    // 갑자기 끌려 들어가지 않게 합니다.
+    if (!this.held) this.reachOverride = Math.max(0, this.reachOverride - PHYSICS.maxDisplacement * dt);
+    this.held = false;
+    const maxD = Math.max(PHYSICS.maxDisplacement, this.reachOverride);
     const dist = this.offset.length();
     if (dist > maxD) {
       this.offset.multiplyScalar(maxD / dist);
@@ -84,7 +92,28 @@ export class GridObject {
     this.rotOffset.y += this.rotVelocity.y * dt;
     this.rotOffset.z += this.rotVelocity.z * dt;
 
-    // 메시에 반영
+    this.syncMesh();
+  }
+
+  // 손 영역 밖으로 밀어냅니다(위치 제약).
+  // (nx, ny): 밀어낼 방향, depth: 겹친 깊이, maxMove: 이번 단계에서 옮길 수 있는 최대 거리
+  // (hvx, hvy): 손이 미는 속도 — 손이 움직이면 그 속도로 함께 밀려납니다.
+  pushOut(nx: number, ny: number, depth: number, maxMove: number, hvx: number, hvy: number): void {
+    const move = Math.min(depth, maxMove);
+    this.offset.x += nx * move;
+    this.offset.y += ny * move;
+    // 손 쪽으로 들어가는 속도는 없애고, 손이 미는 속도보다 느리면 그만큼 맞춰 줌
+    const vn = this.velocity.x * nx + this.velocity.y * ny;
+    const target = Math.max(vn, hvx * nx + hvy * ny, 0);
+    this.velocity.x += nx * (target - vn);
+    this.velocity.y += ny * (target - vn);
+    this.reachOverride = Math.max(this.reachOverride, this.offset.length());
+    this.held = true;
+    this.timeSincePush = 0; // 손이 떠난 뒤 잠깐 멈췄다가 천천히 돌아오도록
+    this.syncMesh();
+  }
+
+  private syncMesh(): void {
     this.mesh.position.set(
       this.home.x + this.offset.x,
       this.home.y + this.offset.y,

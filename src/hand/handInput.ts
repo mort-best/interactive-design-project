@@ -2,12 +2,13 @@ import * as THREE from "three";
 import { HAND } from "../config";
 import type { Collider } from "../interaction";
 import type { HandFrame } from "./handTracker";
+import { HandShape, type HandPoint } from "./handShape";
 import { OneEuro } from "./oneEuro";
 
 // MediaPipe 랜드마크 번호
-const WRIST = 0;
-const PALM_POINTS = [WRIST, 5, 9, 13, 17]; // 손목 + 손가락 뿌리 4개의 평균 = 손바닥 중심
+const PALM_POINTS = [0, 5, 9, 13, 17]; // 손목 + 손가락 뿌리 4개의 평균 = 손바닥 중심
 const TIPS = [4, 8, 12, 16, 20]; // 엄지 ~ 새끼 손가락 끝
+const N = 21;
 
 const smoothAlpha = (cutoffHz: number, dt: number) => 1 / (1 + 1 / (2 * Math.PI * cutoffHz) / dt);
 
@@ -20,16 +21,20 @@ interface Track {
   vy: number;
 }
 
-// 손 랜드마크 → 월드 좌표의 충돌 영역(손바닥 1 + 손가락 끝 5)으로 바꿉니다.
-// 떨림 제거, 손이 사라지거나 다시 나타날 때 부드럽게 켜고 끄기를 담당합니다.
+// 손 랜드마크 21개 → 월드 좌표로 바꾸고 떨림을 줄입니다. 그 결과로
+// 1) 밀어내는 충돌 영역(손바닥 1 + 손가락 끝 5)과
+// 2) 오브젝트가 들어올 수 없는 손 모양 영역(HandShape)을 만듭니다.
+// 손이 사라지거나 다시 나타날 때 둘 다 서서히 켜고 끕니다.
 export class HandInput {
   readonly colliders: Collider[];
+  readonly shape = new HandShape();
   // 0~1. 손 입력이 켜진 정도 (1이면 손으로만 조작)
   presence = 0;
   // 마지막으로 손을 본 시각 (ms)
   lastSeen = -Infinity;
 
   private readonly tracks: Track[];
+  private readonly predicted: HandPoint[] = Array.from({ length: N }, () => ({ x: 0, y: 0, vx: 0, vy: 0 }));
   private needsReset = true;
   private lastFrameTime = 0;
 
@@ -41,7 +46,7 @@ export class HandInput {
   constructor(private readonly camera: THREE.Camera) {
     const make = (radius: number): Collider => ({ x: 0, y: 0, vx: 0, vy: 0, radius, weight: 0 });
     this.colliders = [make(HAND.palmRadius), ...TIPS.map(() => make(HAND.tipRadius))];
-    this.tracks = this.colliders.map(() => ({
+    this.tracks = Array.from({ length: N }, () => ({
       fx: new OneEuro(HAND.minCutoff, HAND.beta),
       fy: new OneEuro(HAND.minCutoff, HAND.beta),
       x: 0,
@@ -76,20 +81,11 @@ export class HandInput {
 
   onFrame(frame: HandFrame, videoW: number, videoH: number): void {
     const lm = frame.landmarks;
-    if (!lm || lm.length < 21 || !videoW || !videoH) return; // 손 없음 → update()에서 서서히 끔
+    if (!lm || lm.length < N || !videoW || !videoH) return; // 손 없음 → update()에서 서서히 끔
 
-    // 이번 프레임의 원래(필터 전) 좌표 6개
+    // 이번 프레임의 원래(필터 전) 좌표 21개
     const raw: { x: number; y: number }[] = [];
-    let px = 0;
-    let py = 0;
-    for (const i of PALM_POINTS) {
-      px += lm[i].x;
-      py += lm[i].y;
-    }
-    const palm = { x: 0, y: 0 };
-    if (!this.toWorld(px / PALM_POINTS.length, py / PALM_POINTS.length, videoW, videoH, palm)) return;
-    raw.push(palm);
-    for (const i of TIPS) {
+    for (let i = 0; i < N; i++) {
       const p = { x: 0, y: 0 };
       if (!this.toWorld(lm[i].x, lm[i].y, videoW, videoH, p)) return;
       raw.push(p);
@@ -100,8 +96,8 @@ export class HandInput {
     const arrived = performance.now();
     const dt = (frame.time - this.lastFrameTime) / 1000;
     const gap = arrived - this.lastSeen;
-    const palmTrack = this.tracks[0];
-    const jumped = Math.hypot(palm.x - palmTrack.x, palm.y - palmTrack.y) > HAND.teleportDistance;
+    const w = raw[0];
+    const jumped = Math.hypot(w.x - this.tracks[0].x, w.y - this.tracks[0].y) > HAND.teleportDistance;
 
     // 손이 새로 나타났거나, 오래 끊겼다가 돌아왔거나, 순간이동처럼 튄 경우:
     // 이전 위치에서 새 위치까지의 이동을 '속도'로 착각하지 않도록 필터를 새 위치로 초기화합니다.
@@ -158,13 +154,35 @@ export class HandInput {
     // 다음 결과까지의 공백만큼 손 속도로 짧게 앞질러 예측합니다(최대 extrapolateMs).
     const ahead = seen ? Math.min(Math.max(0, now - this.lastFrameTime), HAND.extrapolateMs) / 1000 : 0;
     this.tracks.forEach((t, k) => {
-      const c = this.colliders[k];
-      c.x = t.x + t.vx * ahead;
-      c.y = t.y + t.vy * ahead;
-      c.vx = t.vx;
-      c.vy = t.vy;
-      c.weight = this.presence;
+      const p = this.predicted[k];
+      p.x = t.x + t.vx * ahead;
+      p.y = t.y + t.vy * ahead;
+      p.vx = t.vx;
+      p.vy = t.vy;
     });
+
+    // 밀어내는 충돌 영역: 손바닥 중심 + 손가락 끝 5
+    const palm = this.colliders[0];
+    palm.x = palm.y = palm.vx = palm.vy = 0;
+    for (const i of PALM_POINTS) {
+      const p = this.predicted[i];
+      palm.x += p.x / PALM_POINTS.length;
+      palm.y += p.y / PALM_POINTS.length;
+      palm.vx += p.vx / PALM_POINTS.length;
+      palm.vy += p.vy / PALM_POINTS.length;
+    }
+    TIPS.forEach((i, k) => {
+      const c = this.colliders[k + 1];
+      const p = this.predicted[i];
+      c.x = p.x;
+      c.y = p.y;
+      c.vx = p.vx;
+      c.vy = p.vy;
+    });
+    for (const c of this.colliders) c.weight = this.presence;
+
+    // 들어올 수 없는 손 영역 (나타날 때 작게 시작해 커지고, 사라질 때 작아짐)
+    this.shape.set(this.predicted, this.presence);
   }
 
   reset(): void {
@@ -172,5 +190,6 @@ export class HandInput {
     this.lastSeen = -Infinity;
     this.needsReset = true;
     for (const c of this.colliders) c.weight = 0;
+    this.shape.strength = 0;
   }
 }
