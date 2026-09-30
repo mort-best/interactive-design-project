@@ -4,3 +4,6 @@ dist
 .DS_Store
 # npm run dev/build 때 node_modules에서 자동 복사됨
 public/mediapipe
+# 테스트용 가짜 웹캠 영상과 샘플 사진 (tools/make_fake_webcam.py가 생성)
+tools/*.y4m
+tools/woman_hands.jpg

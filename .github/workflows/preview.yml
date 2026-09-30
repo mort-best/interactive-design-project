@@ -1,0 +1,81 @@
+name: Deploy PR previews to GitHub Pages
+
+# GitHub Pages는 한 번에 하나의 사이트만 게시합니다.
+# 그래서 이 워크플로우는 main 작품을 사이트 루트(/)에 그대로 다시 빌드하고,
+# PREVIEW_PRS에 적힌 PR들을 /preview/pr-<번호>/ 에 함께 넣어 한 번에 배포합니다.
+# main 작품은 main 브랜치의 코드 그대로 빌드되므로 바뀌지 않습니다.
+#
+# 이 워크플로우는 pages-preview 브랜치에서만 실행됩니다.
+# main에 새 커밋이 올라가면 deploy.yml이 main만 다시 배포하므로 미리보기 경로는 사라집니다.
+# 그때는 Actions 탭에서 이 워크플로우의 마지막 실행을 "Re-run all jobs" 하면 다시 생깁니다.
+
+on:
+  push:
+    branches: [pages-preview]
+  workflow_dispatch:
+
+env:
+  # 미리보기로 올릴 PR 번호 (공백으로 구분, 예: "3 4")
+  PREVIEW_PRS: "4"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build main (site root)
+        run: |
+          npm ci
+          npm run build
+          mkdir -p "$RUNNER_TEMP/site"
+          cp -r dist/. "$RUNNER_TEMP/site/"
+          echo "main: $(git rev-parse --short HEAD)"
+
+      - name: Build PR previews
+        run: |
+          for n in $PREVIEW_PRS; do
+            git fetch --no-tags origin "pull/$n/head:pr-$n"
+            git worktree add "$RUNNER_TEMP/pr-$n" "pr-$n"
+            (
+              cd "$RUNNER_TEMP/pr-$n"
+              echo "PR #$n: $(git rev-parse --short HEAD)"
+              npm ci
+              npm run build
+              # 브라우저 탭에서 main과 구분되도록 제목만 바꿉니다.
+              sed -i "s#<title>\(.*\)</title>#<title>[PR \#$n 미리보기] \1</title>#" dist/index.html
+            )
+            mkdir -p "$RUNNER_TEMP/site/preview/pr-$n"
+            cp -r "$RUNNER_TEMP/pr-$n/dist/." "$RUNNER_TEMP/site/preview/pr-$n/"
+          done
+          find "$RUNNER_TEMP/site" -type f
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
