@@ -31,7 +31,12 @@ export class GridObject {
   // 마우스로부터 충격을 적용합니다.
   // dir: 밀어내는 방향(정규화됨), strength: 힘의 크기, spin: 회전 충격 벡터
   applyImpulse(dir: THREE.Vector3, strength: number, spin: THREE.Vector3): void {
-    this.velocity.addScaledVector(dir, strength);
+    // 부드러운 한계: 원위치에서 멀어질수록 바깥쪽으로 미는 힘이 약해져
+    // 최대 거리에서 벽에 부딪히듯 멈추지 않고 자연스럽게 느려집니다.
+    const reach = Math.min(this.offset.length() / PHYSICS.maxDisplacement, 1);
+    const outward = this.offset.lengthSq() > 0 && dir.dot(this.offset) > 0;
+    const scale = outward ? 1 - reach * reach : 1;
+    this.velocity.addScaledVector(dir, strength * scale);
     this.rotVelocity.add(spin);
     this.timeSincePush = 0;
   }
@@ -41,8 +46,9 @@ export class GridObject {
 
     // 복귀 지연: 최근에 밀렸다면 잠깐은 스프링 복원력을 약하게 둡니다.
     const returning = this.timeSincePush >= PHYSICS.returnDelay;
-    const posK = returning ? PHYSICS.positionStiffness : PHYSICS.positionStiffness * 0.25;
-    const rotK = returning ? PHYSICS.rotationStiffness : PHYSICS.rotationStiffness * 0.25;
+    const hold = PHYSICS.holdStiffnessRatio;
+    const posK = returning ? PHYSICS.positionStiffness : PHYSICS.positionStiffness * hold;
+    const rotK = returning ? PHYSICS.rotationStiffness : PHYSICS.rotationStiffness * hold;
 
     // --- 위치: 스프링(홈으로 당김) + 감쇠 ---
     // a = -k*offset - c*v

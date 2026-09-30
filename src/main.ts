@@ -140,7 +140,8 @@ function applyInteraction(dt: number): void {
     tmpDir.set(dx / dist, dy / dist, 0);
 
     // 빠르게 움직이면 이동 방향 성분을 더해 더 강하게 밀고 회전을 줌
-    const velContribution = speed * PHYSICS.velocityStrength;
+    // gentleSpeed 이하의 느린 움직임은 기본 힘만으로 부드럽게 밀고, 그보다 빠른 만큼만 힘을 더합니다.
+    const velContribution = Math.max(0, speed - PHYSICS.gentleSpeed) * PHYSICS.velocityStrength;
     tmpDir.x += (pointer.velocity.x / (speed || 1)) * (velContribution / PHYSICS.pushStrength);
     tmpDir.y += (pointer.velocity.y / (speed || 1)) * (velContribution / PHYSICS.pushStrength);
     tmpDir.normalize();
@@ -163,13 +164,17 @@ function applyInteraction(dt: number): void {
 const clock = new THREE.Clock();
 
 function tick(): void {
-  // dt를 상한으로 클램프해서 탭 전환 후 큰 점프를 방지 (안정적인 시뮬레이션)
-  let dt = clock.getDelta();
-  dt = Math.min(dt, PHYSICS.maxDelta);
+  // 실제 경과 시간만큼 시뮬레이션을 진행합니다. 느린 기기에서도 움직임 속도가 같도록
+  // 한 프레임을 작은 단계(stepSize)로 나눠 계산하고, 탭 전환 후의 큰 점프만 maxDelta로 막습니다.
+  const frameDt = Math.min(clock.getDelta(), PHYSICS.maxDelta);
+  const steps = Math.max(1, Math.ceil(frameDt / PHYSICS.stepSize));
+  const h = frameDt / steps;
 
-  pointer.update(dt);
-  applyInteraction(dt);
-  for (const obj of objects) obj.update(dt);
+  pointer.update(frameDt);
+  for (let s = 0; s < steps; s++) {
+    applyInteraction(h);
+    for (const obj of objects) obj.update(h);
+  }
 
   renderer.render(scene, camera);
   requestAnimationFrame(tick);
