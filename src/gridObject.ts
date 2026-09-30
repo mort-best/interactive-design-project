@@ -97,6 +97,11 @@ export class GridObject {
     );
   }
 
+  // 원래 방향에서 얼마나 돌아가 있는지 (라디안, 확인용)
+  get spinAmount(): number {
+    return this.rotOffset.length();
+  }
+
   get worldHome(): THREE.Vector3 {
     return this.home;
   }

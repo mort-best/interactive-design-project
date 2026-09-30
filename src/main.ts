@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { BACKGROUND, GRID, PHYSICS } from "./config";
-import { colorForIndex, createMaterial, getGeometry, shapeForIndex } from "./shapes";
+import { getGeometry, getMaterial, styleForCell, type CellStyle } from "./shapes";
 import { GridObject } from "./gridObject";
 import { Pointer } from "./pointer";
 import { applyColliders, type Collider } from "./interaction";
@@ -11,11 +11,10 @@ import { HandUI } from "./hand/ui";
 const app = document.getElementById("app")!;
 
 // ---------- 렌더러 ----------
+// 그림자는 쓰지 않습니다(오브젝트가 화면을 채우므로 움직임 자체가 잘 보이도록).
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.setClearColor(BACKGROUND, 1);
 app.appendChild(renderer.domElement);
 
@@ -23,19 +22,34 @@ app.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(BACKGROUND);
 
-// ---------- 직교 카메라 (정면에서 약간 내려다보는 시점) ----------
-// 격자 전체를 담을 수 있는 뷰 크기 계산
-const gridWidth = (GRID.cols - 1) * GRID.spacing;
-const gridHeight = (GRID.rows - 1) * GRID.spacing;
-// 화면 비율에 맞춰 격자(+그림자, 흩어질 여유)가 항상 다 보이도록 뷰 높이를 정합니다.
-// 가로가 넓은 화면에서는 높이 기준, 좁은 창에서는 폭 기준으로 맞춥니다.
-function viewHeight(aspect: number): number {
-  return Math.max(gridHeight + 5, (gridWidth + 3) / aspect);
+// ---------- 격자 크기: 창을 가득 채우는 행·열 수 ----------
+interface Layout {
+  cols: number;
+  rows: number;
 }
 
+function computeLayout(): Layout {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  let cell = THREE.MathUtils.clamp(Math.min(w, h) / GRID.shortSideCells, GRID.minCellPx, GRID.maxCellPx);
+  // 아주 큰 화면에서는 칸을 키워 전체 개수를 상한 이하로 유지
+  cell = Math.max(cell, Math.sqrt((w * h) / GRID.maxObjects));
+  return { cols: Math.max(3, Math.round(w / cell)), rows: Math.max(3, Math.round(h / cell)) };
+}
+
+let layout = computeLayout();
+
+// ---------- 직교 카메라 (정면에서 약간 내려다보는 시점) ----------
+const CAMERA_POS = new THREE.Vector3(0, 4.8, 18);
+// 살짝 내려다보기 때문에 화면에서 격자의 세로 길이가 이 비율만큼 짧아 보입니다.
+const TILT_COS = CAMERA_POS.z / Math.hypot(CAMERA_POS.y, CAMERA_POS.z);
+
+// 격자가 창을 꽉 채우도록(가장자리에 반 칸 여백) 뷰 크기를 맞춥니다.
 function fitCamera(cam: THREE.OrthographicCamera): void {
   const aspect = window.innerWidth / window.innerHeight;
-  const halfH = viewHeight(aspect) / 2;
+  const needW = layout.cols * GRID.spacing;
+  const needH = layout.rows * GRID.spacing * TILT_COS;
+  const halfH = Math.max(needH, needW / aspect) / 2;
   const halfW = halfH * aspect;
   cam.left = -halfW;
   cam.right = halfW;
@@ -44,86 +58,52 @@ function fitCamera(cam: THREE.OrthographicCamera): void {
   cam.updateProjectionMatrix();
 }
 
-let camera: THREE.OrthographicCamera;
-function makeCamera(): THREE.OrthographicCamera {
-  const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
-  fitCamera(cam);
-  // 정면에서 약간 위에 두고 살짝 내려다봅니다.
-  cam.position.set(0, 4.5, 18);
-  cam.lookAt(0, -0.3, 0);
-  return cam;
-}
-camera = makeCamera();
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
+camera.position.copy(CAMERA_POS);
+camera.lookAt(0, 0, 0);
+fitCamera(camera);
 
 // ---------- 조명 (넓고 부드럽게) ----------
 scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+scene.add(new THREE.HemisphereLight(0xfff6e8, 0xcfc7ba, 0.6));
 
-const hemi = new THREE.HemisphereLight(0xfff6e8, 0xcfc7ba, 0.6);
-scene.add(hemi);
-
-// 주 조명: 그림자를 만들어 부드러운 접촉 그림자 생성
 const key = new THREE.DirectionalLight(0xfff4e2, 1.15);
 key.position.set(6, 14, 10);
-key.castShadow = true;
-key.shadow.mapSize.set(2048, 2048);
-key.shadow.radius = 8; // 부드러운 가장자리
-key.shadow.bias = -0.0005;
-const shadowCam = key.shadow.camera;
-shadowCam.left = -gridWidth / 2 - 4;
-shadowCam.right = gridWidth / 2 + 4;
-shadowCam.top = gridHeight / 2 + 6;
-shadowCam.bottom = -gridHeight / 2 - 6;
-shadowCam.near = 1;
-shadowCam.far = 40;
 scene.add(key);
 
-// 채움광(약하게, 그림자 없음)
+// 채움광(약하게)
 const fill = new THREE.DirectionalLight(0xe8ecff, 0.35);
 fill.position.set(-8, 4, 6);
 scene.add(fill);
 
-// ---------- 바닥 (그림자를 받는 면) ----------
-// ShadowMaterial을 써서 바닥 색은 배경과 동일하게 두고 그림자만 얹습니다.
-const floorY = -gridHeight / 2 - 1.4;
-const floor = new THREE.Mesh(
-  new THREE.PlaneGeometry(gridWidth + 20, gridHeight + 20),
-  new THREE.ShadowMaterial({ opacity: 0.18 })
-);
-floor.rotation.x = -Math.PI / 2;
-floor.position.set(0, floorY, 0);
-floor.receiveShadow = true;
-scene.add(floor);
-
-// ---------- 격자 배치 (6 × 4) ----------
+// ---------- 격자 배치 ----------
 const objects: GridObject[] = [];
-const startX = -gridWidth / 2;
-const startY = gridHeight / 2;
 
-let index = 0;
-for (let r = 0; r < GRID.rows; r++) {
-  for (let c = 0; c < GRID.cols; c++) {
-    const kind = shapeForIndex(index);
-    const color = colorForIndex(index);
-    const mesh = new THREE.Mesh(getGeometry(kind), createMaterial(color));
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
+function buildGrid(): void {
+  for (const o of objects) scene.remove(o.mesh); // 지오메트리·소재는 공유라 그대로 둠
+  objects.length = 0;
 
-    // 링은 정면을 향하도록 살짝 세워 둡니다.
-    if (kind === "ring") {
-      mesh.rotation.x = Math.PI / 2;
+  const { cols, rows } = layout;
+  const startX = (-(cols - 1) * GRID.spacing) / 2;
+  const startY = ((rows - 1) * GRID.spacing) / 2;
+  const styles: CellStyle[][] = [];
+
+  for (let r = 0; r < rows; r++) {
+    styles[r] = [];
+    for (let c = 0; c < cols; c++) {
+      const style = styleForCell(r, c, styles[r][c - 1], styles[r - 1]?.[c]);
+      styles[r][c] = style;
+      const mesh = new THREE.Mesh(getGeometry(style.kind), getMaterial(style.color));
+      // 링은 정면을 향하도록 살짝 세워 둡니다.
+      if (style.kind === "ring") mesh.rotation.x = Math.PI / 2;
+
+      const home = new THREE.Vector3(startX + c * GRID.spacing, startY - r * GRID.spacing, 0);
+      objects.push(new GridObject(mesh, home));
+      scene.add(mesh);
     }
-
-    const home = new THREE.Vector3(
-      startX + c * GRID.spacing,
-      startY - r * GRID.spacing,
-      0
-    );
-    const obj = new GridObject(mesh, home);
-    scene.add(mesh);
-    objects.push(obj);
-    index++;
   }
 }
+buildGrid();
 
 // ---------- 포인터 ----------
 const pointer = new Pointer(camera, renderer.domElement);
@@ -206,6 +186,8 @@ requestAnimationFrame(tick);
 (window as unknown as Record<string, unknown>).__grid = {
   displacements: () =>
     objects.map((o) => o.position.distanceTo(o.worldHome)),
+  spins: () => objects.map((o) => o.spinAmount),
+  layout: () => ({ ...layout, count: objects.length }),
   poke: (i: number, fx: number, fy: number) =>
     objects[i]?.applyImpulse(new THREE.Vector3(fx, fy, 0).normalize(), Math.hypot(fx, fy), new THREE.Vector3(0.5, 0.5, 1)),
   hand: () => ({
@@ -223,7 +205,18 @@ requestAnimationFrame(tick);
 };
 
 // ---------- 리사이즈 ----------
+// 창 크기가 바뀌면 바로 화면을 맞추고, 행·열 수가 달라졌으면 크기 조절이 끝난 뒤 격자를 다시 만듭니다.
+let rebuildTimer = 0;
 window.addEventListener("resize", () => {
-  fitCamera(camera);
   renderer.setSize(window.innerWidth, window.innerHeight);
+  fitCamera(camera);
+  window.clearTimeout(rebuildTimer);
+  rebuildTimer = window.setTimeout(() => {
+    const next = computeLayout();
+    if (next.cols !== layout.cols || next.rows !== layout.rows) {
+      layout = next;
+      buildGrid();
+      fitCamera(camera);
+    }
+  }, 150);
 });
